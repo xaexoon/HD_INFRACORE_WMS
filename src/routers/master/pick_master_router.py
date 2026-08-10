@@ -28,10 +28,21 @@ def pick_items(order_no: str, vornr: str):
         return response_schema.response(False, "해당 공정의 자재가 없습니다", None)
     return response_schema.response(True, "하위 자재 조회 성공", result)
 
+@router.get("/get/pick/master/check")
+def pick_check(order_no: str, vornr: str):
+    """[확정 가능 여부] — 버튼 활성화 판단용."""
+    invalid  = pick_master_service.get_invalid(order_no, vornr)
+    shortage = pick_master_service.check_stock(order_no, vornr)
+    return response_schema.response(True, "확정 검증 완료", {
+        "can_confirm":   not invalid and not shortage,
+        "invalid_items": invalid,
+        "short_items":   shortage,
+    })
+
 
 @router.post("/confirm/pick/master/list")
 def confirm_pick(body: pick_master_schema.PickConfirm):
-    """[확정] — kit_table 생성 + W/D-LPN 선발행."""
+    """[확정] — kit_table 생성 + R-LPN 할당(PLAN) + pick_table ISSUED."""
     logger.info("[pick] 확정 요청: %s", body.model_dump())
     try:
         result = pick_master_service.confirm(body.order_no, body.vornr, body.worker_id)
@@ -42,9 +53,12 @@ def confirm_pick(body: pick_master_schema.PickConfirm):
     return response_schema.response(True, "피킹 확정 완료", result)
 
 
-# 피킹리스트 분할
-@router.post("/split/pick/master")
-def split_pick():
-    return None
-
-# 피킹리스트 통합
+@router.post("/cancel/pick/master/{kit_seq}")
+def cancel_pick(kit_seq: int, worker_id: str):
+    """[확정 취소] — 피킹 시작 전에만 가능."""
+    try:
+        result = pick_master_service.cancel(kit_seq, worker_id)
+    except ValueError as e:
+        logger.warning("[pick] 취소 차단: kit=%s reason=%s", kit_seq, e)
+        return response_schema.response(False, str(e), None)
+    return response_schema.response(True, "확정 취소 완료", result)
