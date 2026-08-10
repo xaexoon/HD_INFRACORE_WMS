@@ -7,13 +7,20 @@ router = APIRouter()
 
 @router.get("/get/all/pick/list")
 def get_all_pick_list():
-    result = pick_service.get_all_picking_list()
-    return response_schema.response(True, "피킹 리스트 전체 조회", result)
-
-@router.get("/get/all/pick/grp/kit")
-def get_pick_list_grp_kit():
     result = pick_service.get_pick_list_grp_kit()
-    return response_schema.response(True, "피킹 리스트 전체 조회", result)
+    return response_schema.response(True, "확정된 피킹 리스트 전체 조회", result)
+
+# @router.get("/get/all/pick/grp/kit")
+# def get_pick_list_grp_kit():
+#     result = pick_service.get_pick_list_grp_kit()
+#     return response_schema.response(True, "피킹 리스트 전체 조회", result)
+
+@router.get("/get/pick/{seq}")
+def get_pick_by_seq(seq:int):
+    result = pick_service.get_pick_by_seq(seq)
+    return response_schema.response(True, "확정된 단일 피킹리스트 조회", result)
+
+@router.get("/get/pick/{}")
 
 # 라벨 선발행 (W-LPN)
 @router.get("/insert/w/lpn")

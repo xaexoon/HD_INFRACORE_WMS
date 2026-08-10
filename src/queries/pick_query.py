@@ -51,7 +51,7 @@ SELECT p.seq,
 """
 
 
-SELECT_ALL_BY_KIT_SEQ = """
+SELECT_BY_SEQ_GROUP_KIT = """
 SELECT p.seq,
        p.kit_seq,
        p.order_no,
@@ -77,3 +77,4 @@ SELECT p.seq,
  ORDER BY CASE WHEN p.lpn_type = 'W' THEN 0 ELSE 1 END,
           p.item_code
 """
+

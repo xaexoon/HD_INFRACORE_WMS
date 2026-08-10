@@ -39,5 +39,38 @@ def get_pick_list_grp_kit() -> dict:
 
     return {"pick_lists": list(kits.values()), "total": len(kits)}
 
+def get_pick_by_seq(seq:int):
+    rows = query(pick_query.SELECT_BY_SEQ_GROUP_KIT, (seq,))
+
+    kits = {}
+    for r in rows:
+        k = r["kit_seq"]
+        if k not in kits:
+            kits[k] = {
+                "kit_seq": k,
+                "order_no": r["order_no"],
+                "mes_seq_no": r["mes_seq_no"],
+                "engine_no": r["engine_no"],
+                "proc_code": r["proc_code"],
+                "work_center_nm": r["work_center_nm"],
+                "delivery_seq": r["delivery_seq"],
+                "kit_status": r["kit_status"],
+                "hold_yn": bool(r["hold_yn"]),
+                "items": [],
+            }
+        kits[k]["items"].append({
+            "seq": r["seq"],
+            "item_code": r["item_code"],
+            "item_name": r["item_name"],
+            "req_qty": r["req_qty"],
+            "picked_qty": r["picked_qty"],
+            "uom": r["uom"],
+            "lpn_type": r["lpn_type"],
+            "status": r["status"],
+        })
+
+    return {"pick_lists": list(kits.values()), "total": len(kits)}
+
+
 def insert_w_lpn():
     return None
