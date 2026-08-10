@@ -67,18 +67,23 @@ WHERE item_code = ? AND use_yn = 1
 #   타입별 + 일자별 독립 채번, 일자 변경 시 00001 로 리셋.
 #   파라미터 : lpn_type, yymmdd, lpn_type, yymmdd, lpn_type, yymmdd
 NEXT_LPN_NO = """
-UPDATE dbo.lpn_seq WITH (UPDLOCK, HOLDLOCK)
-   SET last_no = last_no + 1
- WHERE lpn_type = ? AND yymmdd = ?;
+SET NOCOUNT ON;
+DECLARE @d  CHAR(6) = CONVERT(CHAR(6), GETDATE(), 12);
+DECLARE @no INT;
 
-IF @@ROWCOUNT = 0
-    INSERT INTO dbo.lpn_seq (lpn_type, yymmdd, last_no) VALUES (?, ?, 1);
+UPDATE lpn_seq WITH (UPDLOCK, SERIALIZABLE)
+   SET @no = last_no = last_no + 1
+ WHERE lpn_type = ? AND yymmdd = @d;
 
-SELECT ? + ? + RIGHT('00000' + CAST(last_no AS VARCHAR(5)), 5) AS lpn_code
-  FROM dbo.lpn_seq
- WHERE lpn_type = ? AND yymmdd = ?;
+IF @no IS NULL
+BEGIN
+    INSERT INTO lpn_seq (lpn_type, yymmdd, last_no) VALUES (?, @d, 1);
+    SET @no = 1;
+END
+
+SELECT ? + @d + RIGHT('0000' + CAST(@no AS VARCHAR(5)), 5) AS lpn_code,
+       @no AS seq_no;
 """
-
 
 # ── 1. 입고 등록 ────────────────────────────────────────────
 #   process_status 는 DEFAULT 로 CREATED. 위치·라벨 없음.
@@ -86,7 +91,7 @@ INSERT_MASTER = """
 INSERT INTO lpn_master (lpn_code, lpn_type, process_status,
                         lifecycle_status, location_seq, print_yn, split_yn)
 OUTPUT INSERTED.seq
-VALUES (?, ?, 'CREATED', 'ACTIVE', NULL, 0, 0)
+VALUES (?, ?, ?, 'ACTIVE', NULL, 0, 0)
 """
 
 INSERT_DETAIL = """

@@ -19,12 +19,19 @@ def get_r_lpn_by_code(lpn_code:str):
     return query(lpn_query.SELECT_R_LPN_BY_CODE, (lpn_code,))
 
 def make_r_lpn(cur) -> str:
-    """R LPN 코드 채번. 형식: R + YYMMDD + 5자리 (예: R26072300001)"""
-    prefix = f"R{datetime.now().strftime('%y%m%d')}"
-    cur.execute(lpn_query.NEXT_LPN_NO, ("R", f"{prefix}%"))
-    next_no = cur.fetchone()[0]
-    return f"{prefix}{next_no:05d}"
+    """R-LPN 코드 채번. 형식: R + YYMMDD + 5자리 (예: R26072300001)"""
+    cur.execute(lpn_query.NEXT_LPN_NO, ("R", "R", "R"))
+    row = cur.fetchone()
 
+    if row is None:
+        raise RuntimeError("LPN 채번 실패: R")
+
+    lpn_code, seq_no = row[0], row[1]
+
+    if seq_no > 99999:
+        raise RuntimeError("일련번호 소진: R (99999 초과)")
+
+    return lpn_code
 
 def insert_lpn_master(cur, lpn_code: str, lpn_type: str,
                       process_status: str) -> int:

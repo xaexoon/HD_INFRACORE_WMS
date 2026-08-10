@@ -20,6 +20,9 @@ logs/
 *.log
 *.log.*
 
+# --------- 웹 빌드 ---------
+web_build/
+
 # ---------- 설정 ----------
 option.ini
 option.ini.local
