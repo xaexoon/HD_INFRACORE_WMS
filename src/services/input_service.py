@@ -76,7 +76,7 @@ def insert_r_lpn(body: input_schema.InsertRLpn) -> dict:
 def print_r_lpn(lpn_master_seq: int) -> dict:
     """R LPN 출력 처리. print_yn 0 -> 1."""
 
-    execute(lpn_query.UPDATE_PRINT_YN_BY_SEQ, (lpn_master_seq,))
+    execute(lpn_query.UPDATE_PRINTED_BY_SEQ, (lpn_master_seq,))
 
     logger.info(f"R LPN 출력 완료: {lpn_master_seq}")
 
@@ -84,12 +84,13 @@ def print_r_lpn(lpn_master_seq: int) -> dict:
 
 
 def bind_r_lpn(r_lpn_seq: int, location_seq: int,
-               device_id: str, worker_id: str) -> dict:
+               device_id: str | None = None,
+               worker_id: str | None = None) -> dict:
     """위치 + LPN 스캔 바인딩. 적치 완료 후 가용재고 전환."""
 
     with transaction() as cur:
         # 1) 위치 유효성 — 사용 가능한 셀인지, 이미 점유 중인지
-        cur.execute(lpn_query.CHECK_LOCATION_USEABLE, (location_seq,))
+        cur.execute(lpn_query.CHECK_LOCATION_USABLE, (location_seq,))
         if not cur.fetchone():
             raise ValueError("사용할 수 없는 위치입니다")
 
