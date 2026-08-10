@@ -20,18 +20,26 @@ def get_pick_by_seq(seq:int):
     result = pick_service.get_pick_by_seq(seq)
     return response_schema.response(True, "확정된 단일 피킹리스트 조회", result)
 
-@router.get("/get/pick/{}")
 
 # 라벨 선발행 (W-LPN)
-@router.get("/insert/w/lpn")
-def insert_w_lpn(body: pick_schema.InsertWLpn):
-    result = pick_service.insert_w_lpn()
-    return response_schema.response(True, "W LPN 발행 완료", None)
+# pick_router.py
+@router.post("/insert/w-lpn/{kit_seq}")
+def insert_w_lpn(kit_seq: int):
+    try:
+        data = pick_service.issue_w_lpn(kit_seq)
+        return response_schema.response(True, "W-LPN 발행 완료", data)
+    except Exception as e:
+        logger.error(f"W-LPN 발행 실패 - {e}")
+        return response_schema.response(False, str(e), None)
 
-# 라벨 선발행 (D-LPN)
-@router.get("/insert/d/lpn")
-def insert_d_lpn():
-    return response_schema.response(True, "D LPN 발행 완료", None)
+@router.post("/insert/d-lpn/{kit_seq}")
+def insert_d_lpn(kit_seq: int):
+    try:
+        data = pick_service.issue_d_lpn(kit_seq)
+        return response_schema.response(True, "D-LPN 발행 완료", data)
+    except Exception as e:
+        logger.error(f"D-LPN 발행 실패 - {e}")
+        return response_schema.response(False, str(e), None)
 
 # 바인딩 (W-LPN)
 @router.get("/bind/w/lpn")

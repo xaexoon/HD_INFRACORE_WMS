@@ -20,6 +20,7 @@ class PickingRead(BaseModel):
 
 class WLpnItem(BaseModel):
     item_seq: int
+    item_code: str
     init_qty: int = Field(..., gt=0)
 
 
