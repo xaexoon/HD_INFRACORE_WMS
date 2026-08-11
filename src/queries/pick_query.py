@@ -2,7 +2,7 @@ SELECT_ALL = """
 SELECT p.seq,
        p.kit_seq,
        p.order_no,
-       k.mes_seq_no,
+       k.engine_seq_no,
        k.engine_no,
        k.proc_code,
        k.work_center_nm,
@@ -26,7 +26,7 @@ SELECT_ALL_GROUP_KIT = """
 SELECT p.seq,
        p.kit_seq,
        p.order_no,
-       k.mes_seq_no,
+       k.engine_seq_no,
        k.engine_no,
        k.proc_code,
        k.work_center_nm,
@@ -45,7 +45,7 @@ SELECT p.seq,
  WHERE p.status = 'ISSUED'
    AND p.lifecycle_status = 'ACTIVE'
    AND k.lifecycle_status = 'ACTIVE'
- ORDER BY k.mes_seq_no,
+ ORDER BY k.engine_seq_no,
           k.delivery_seq,
           CASE WHEN p.lpn_type = 'W' THEN 0 ELSE 1 END,
           p.item_code
@@ -56,7 +56,7 @@ SELECT_BY_SEQ_GROUP_KIT = """
 SELECT p.seq,
        p.kit_seq,
        p.order_no,
-       k.mes_seq_no,
+       k.engine_seq_no,
        k.engine_no,
        k.proc_code,
        k.work_center_nm,
@@ -103,7 +103,7 @@ SELECT ? + @d + RIGHT('0000' + CAST(@no AS VARCHAR(5)), 5) AS lpn_code,
 INSERT_LPN_MASTER = """
 INSERT INTO lpn_master
     (lpn_code, lpn_type, process_status, lifecycle_status,
-     print_yn, split_yn, kit_seq, order_no, engine_no, proc_code, mes_seq_no)
+     print_yn, split_yn, kit_seq, order_no, engine_no, proc_code, engine_seq_no)
 OUTPUT INSERTED.seq
 VALUES (?, ?, 'CREATED', 'ACTIVE', 0, 0, ?, ?, ?, ?, ?);
 """
@@ -143,7 +143,7 @@ SELECT COUNT(*) FROM pick_table
 """
 
 SELECT_KIT_HEAD = """
-SELECT ORDER_NO, ENGINE_NO, PROC_CODE, MES_SEQ_NO, W_LPN_SEQ, D_LPN_SEQ
+SELECT ORDER_NO, ENGINE_NO, PROC_CODE, ENGINE_SEQ_NO, W_LPN_SEQ, D_LPN_SEQ
   FROM kit_table WHERE SEQ = ? AND LIFECYCLE_STATUS = 'ACTIVE';
 """
 

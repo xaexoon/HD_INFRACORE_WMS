@@ -102,7 +102,7 @@ def _group_by_lpn(rows: list[dict]) -> list[dict]:
                 "order_no":       r["order_no"],
                 "engine_no":      r["engine_no"],
                 "proc_code":      r["proc_code"],
-                "mes_seq_no":     r["mes_seq_no"],
+                "engine_seq_no":  r["engine_seq_no"],
                 "total_qty":      0,
                 "items":          [],
             }

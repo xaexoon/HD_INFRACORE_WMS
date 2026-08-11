@@ -5,7 +5,7 @@ SELECT
     P.ORDER_NO,
     P.VORNR              AS PROC_CODE,
     MAX(H.EQUNR)         AS ENGINE_NO,
-    MAX(H.SEQNO)         AS MES_SEQ_NO,
+    MAX(H.SEQNO)         AS ENGINE_SEQ_NO,
     MAX(H.GSTRS)         AS PLAN_DATE,
     MAX(M.proc_name)     AS PROC_NAME,
     MAX(M.proc_order)    AS PROC_SORT,
@@ -133,7 +133,7 @@ SELECT SEQ, ITEM_SEQ, REQ_QTY
 #   파라미터 : vornr, order_no, vornr
 INSERT_KIT = """
 INSERT INTO kit_table
-    (ORDER_NO, MES_SEQ_NO, ENGINE_NO, MODEL, PLAN_DATE,
+    (ORDER_NO, ENGINE_SEQ_NO, ENGINE_NO, MODEL, PLAN_DATE,
      PROC_CODE, PROC_SORT, WORK_CENTER, WORK_CENTER_NM,
      DELIVERY_SEQ, STATUS, HOLD_YN, LIFECYCLE_STATUS, SRC_ORDER_H_SEQ)
 OUTPUT INSERTED.SEQ
@@ -203,14 +203,4 @@ UPDATE kit_table
    SET STATUS = 'CANCEL', LIFECYCLE_STATUS = 'INACTIVE',
        UPDATED_DATE = SYSDATETIME()
  WHERE SEQ = ? AND STATUS = 'WAIT'
-"""
-
-SELECT_ALLOCATABLE = """
-SELECT V.lpn_master_seq, V.detail_seq, V.available_qty
-  FROM V_LPN_ALLOCATABLE V
- WHERE V.item_seq = ?
-   AND V.lpn_type = 'R'
-   AND V.process_status = 'AVAILABLE'
-   AND V.available_qty > 0
- ORDER BY V.split_yn DESC, V.receipt_date, V.lpn_master_seq
 """

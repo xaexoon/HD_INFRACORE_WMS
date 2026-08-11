@@ -45,10 +45,10 @@ SELECT
     tl.location_code AS to_location_code,
     ISNULL(tz.zone_name, fz.zone_name) AS zone_name,
 
-    ISNULL(tm.order_no,   m.order_no)   AS order_no,
-    ISNULL(tm.engine_no,  m.engine_no)  AS engine_no,
-    ISNULL(tm.proc_code,  m.proc_code)  AS proc_code,
-    ISNULL(tm.mes_seq_no, m.mes_seq_no) AS mes_seq_no
+    ISNULL(tm.order_no,      m.order_no)      AS order_no,
+    ISNULL(tm.engine_no,     m.engine_no)     AS engine_no,
+    ISNULL(tm.proc_code,     m.proc_code)     AS proc_code,
+    ISNULL(tm.engine_seq_no, m.engine_seq_no) AS engine_seq_no
 FROM lpn_txn t
 JOIN lpn_master m        ON m.seq = t.lpn_master_seq
 LEFT JOIN lpn_master tm  ON tm.seq = t.to_lpn_seq
@@ -163,7 +163,7 @@ SELECT
     tm.lpn_code       AS to_lpn_code,
     tm.lpn_type       AS to_lpn_type,
 
-    tm.order_no, tm.engine_no, tm.proc_code, tm.mes_seq_no,
+    tm.order_no, tm.engine_no, tm.proc_code, tm.engine_seq_no,
     fl.location_code  AS from_location_code,
     tl.location_code  AS to_location_code
 FROM lpn_txn t
@@ -228,10 +228,10 @@ SELECT
     tr.rack_code       AS to_rack_code,
     tz.zone_name       AS to_zone_name,
 
-    ISNULL(tm.order_no,   m.order_no)   AS order_no,
-    ISNULL(tm.engine_no,  m.engine_no)  AS engine_no,
-    ISNULL(tm.proc_code,  m.proc_code)  AS proc_code,
-    ISNULL(tm.mes_seq_no, m.mes_seq_no) AS mes_seq_no
+    ISNULL(tm.order_no,      m.order_no)      AS order_no,
+    ISNULL(tm.engine_no,     m.engine_no)     AS engine_no,
+    ISNULL(tm.proc_code,     m.proc_code)     AS proc_code,
+    ISNULL(tm.engine_seq_no, m.engine_seq_no) AS engine_seq_no
 FROM lpn_txn t
 JOIN lpn_master m        ON m.seq = t.lpn_master_seq
 LEFT JOIN lpn_master tm  ON tm.seq = t.to_lpn_seq

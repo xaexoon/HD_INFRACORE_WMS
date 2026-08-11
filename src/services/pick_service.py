@@ -40,7 +40,7 @@ def get_pick_list_grp_kit() -> dict:
             kits[k] = {
                 "kit_seq": k,
                 "order_no": r["order_no"],
-                "mes_seq_no": r["mes_seq_no"],
+                "engine_seq_no": r["engine_seq_no"],
                 "engine_no": r["engine_no"],
                 "proc_code": r["proc_code"],
                 "work_center_nm": r["work_center_nm"],
@@ -72,7 +72,7 @@ def get_pick_by_seq(seq:int):
             kits[k] = {
                 "kit_seq": k,
                 "order_no": r["order_no"],
-                "mes_seq_no": r["mes_seq_no"],
+                "engine_seq_no": r["engine_seq_no"],
                 "engine_no": r["engine_no"],
                 "proc_code": r["proc_code"],
                 "work_center_nm": r["work_center_nm"],
