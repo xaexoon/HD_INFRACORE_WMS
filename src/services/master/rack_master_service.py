@@ -1,9 +1,9 @@
 from src.queries.master import rack_master_query
-from src.db.connection import query, execute
+from src.db.connection import query, execute, transaction
 from src.logger.logger import get_logger
 from src.schemas.master import rack_master_schema
 
-logger = get_logger("Rack Master Service")
+logger = get_logger("svc.rackm")
 
 
 # ── 조회 ───────────────────────────────────────────────────
@@ -14,10 +14,6 @@ def get_all_racks() -> list[dict]:
 def get_racks_by_search(keyword: str) -> list[dict]:
     like = f"%{keyword}%"
     return query(rack_master_query.SELECT_BY_CODE, (like, like))
-
-
-def get_racks_by_zone(zone_seq: int) -> list[dict]:
-    return query(rack_master_query.SELECT_BY_ZONE, (zone_seq,))
 
 
 def get_rack_by_seq(seq: int) -> dict | None:
@@ -49,7 +45,6 @@ def get_rack_by_seq(seq: int) -> dict | None:
             "location_code": r["location_code"],
             "row_no": r["row_no"],
             "col_no": r["col_no"],
-            "max_weight": r["max_weight"],
             "enable_yn": r["location_enable_yn"],
         })
     return rack
@@ -81,7 +76,7 @@ def insert_rack_master(body: rack_master_schema.RackInsert) -> int:
     cell_cnt = 0
     if body.rows and body.cols:
         cell_cnt = execute(rack_master_query.INSERT_LOCATIONS,
-                           (DEFAULT_MAX_WEIGHT, body.rows, body.cols, rack_seq))
+                           (body.rows, body.cols, rack_seq))
 
     logger.info("랙 등록: %s (seq=%s, 셀 %s개)", body.rack_code, rack_seq, cell_cnt)
     return rack_seq
@@ -96,7 +91,7 @@ def update_rack_master(body: rack_master_schema.RackUpdate) -> int:
 
     if affected and body.rows and body.cols:
         added = execute(rack_master_query.INSERT_LOCATIONS,
-                        (DEFAULT_MAX_WEIGHT, body.rows, body.cols, body.seq))
+                        (body.rows, body.cols, body.seq))
         if added:
             logger.info("셀 증설: seq=%s +%s개", body.seq, added)
 
@@ -111,12 +106,35 @@ def disable_rack_master(seq: int) -> int:
     return affected
 
 
-def count_locations(seq: int) -> int:
-    rows = query(rack_master_query.CHECK_DELETABLE, (seq,))
-    return rows[0]["location_cnt"] if rows else 0
+def check_deletable(seq: int) -> dict:
+    """삭제를 막는 참조가 있는지 센다.
+
+    셀 개수로 막으면 안 된다. 랙을 등록하면 셀이 곧바로 생기므로
+    그 조건은 사실상 영구 차단이 된다.
+    실제로 막아야 하는 것은 그 셀을 참조하는 재고 / 지시 / 이력이다.
+    """
+    rows = query(rack_master_query.CHECK_DELETABLE, (seq,) * 5)
+    if not rows:
+        return {"location_cnt": 0, "lpn_cnt": 0, "pick_cnt": 0, "txn_cnt": 0}
+    return rows[0]
 
 
 def delete_rack_master(seq: int) -> int:
-    affected = execute(rack_master_query.DELETE, (seq,))
-    logger.info("랙 삭제: seq=%s", seq)
+    """랙 삭제. 하위 셀을 먼저 지운다.
+
+    location_master.rack_seq 에 FK(NO_ACTION)가 걸려 있어 셀이 남아 있으면
+    랙만 지우는 것은 FK 위반으로 실패한다. 셀은 랙에 종속된 것이므로
+    함께 지운다. 한 트랜잭션으로 묶어야 셀만 지워진 랙이 남지 않는다.
+
+    참조 검사는 호출 전에 check_deletable() 로 끝내둔다.
+    """
+    with transaction() as cur:
+        cur.execute(rack_master_query.DELETE_LOCATIONS, (seq,))
+        cell_cnt = cur.rowcount
+
+        cur.execute(rack_master_query.DELETE, (seq,))
+        affected = cur.rowcount
+
+    if affected:
+        logger.info("랙 삭제: seq=%s (셀 %s개 함께 삭제)", seq, cell_cnt)
     return affected

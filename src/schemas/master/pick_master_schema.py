@@ -1,8 +1,44 @@
 from pydantic import BaseModel, Field
 
 
-class PickConfirm(BaseModel):
-    """피킹 JOB 확정 요청"""
-    order_no: str = Field(..., max_length=12, description="생산오더번호")
-    vornr: str = Field(..., max_length=4, description="공정코드")
-    worker_id: str = Field(..., max_length=30, description="확정자")
+class EmergencyPick(BaseModel):
+    pick_seq:  int
+    qty:       int
+    reason:    str | None = None
+    worker_id: str | None = None
+
+class CancelEmergencyPick(BaseModel):
+    pick_seq:  int
+    reason:    str | None = None
+    worker_id: str | None = None
+
+class ManualPickItem(BaseModel):
+    item_code: str
+    req_qty:   int
+
+class ManualPick(BaseModel):
+    order_no:      str
+    vornr:         str
+    engine_no:     str
+    items:         list[ManualPickItem]
+    plan_date:     str | None = None
+    engine_seq_no: str | None = None
+    arbpl:         str | None = None
+    remark:        str | None = None
+    worker_id:     str | None = None
+
+class SplitPickItem(BaseModel):
+    pick_seq: int
+    qty:      int
+
+
+class SplitPick(BaseModel):
+    pick_no:   str
+    items:     list[SplitPickItem]
+    reason:    str | None = None
+    worker_id: str | None = None
+
+class CancelSplitPick(BaseModel):
+    pick_no:   str
+    reason:    str | None = None
+    worker_id: str | None = None

@@ -18,7 +18,7 @@ from typing import Callable, Dict, List, Optional
 from src.plc.mc_protocol import MCProtocolClient, MCProtocolError
 from src.logger.logger import get_logger
 
-logger = get_logger("plc_service")
+logger = get_logger("svc.plc")
 
 
 # ---------------------------------------------------------------------------

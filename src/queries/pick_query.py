@@ -1,31 +1,10 @@
-SELECT_ALL = """
-SELECT p.seq,
-       p.kit_seq,
-       p.order_no,
-       k.engine_seq_no,
-       k.engine_no,
-       k.proc_code,
-       k.work_center_nm,
-       k.delivery_seq,
-       p.item_code,
-       p.item_name,
-       p.req_qty,
-       p.picked_qty,
-       p.uom,
-       p.lpn_type,
-       p.status
-  FROM PICK_TABLE p
-  JOIN KIT_TABLE  k ON k.seq = p.kit_seq
- WHERE p.status IN ('ISSUED','PICKED')
-   AND p.lifecycle_status = 'ACTIVE'
-   AND k.lifecycle_status = 'ACTIVE'
- ORDER BY k.delivery_seq, p.item_code
-"""
-
 SELECT_ALL_GROUP_KIT = """
 SELECT p.seq,
        p.kit_seq,
+       p.pick_no,
        p.order_no,
+       p.model,
+       k.kit_no,
        k.engine_seq_no,
        k.engine_no,
        k.proc_code,
@@ -35,33 +14,56 @@ SELECT p.seq,
        k.hold_yn,
        k.w_lpn_seq,
        k.d_lpn_seq,
+       w.lpn_code       AS w_lpn_code,
+       w.process_status AS w_lpn_status,
+       wl.location_code AS w_location,
+       d.lpn_code       AS d_lpn_code,
+       d.process_status AS d_lpn_status,
+       dl.location_code AS d_location,
        p.item_code,
        p.item_name,
        p.req_qty,
        p.picked_qty,
        p.uom,
        p.lpn_type,
-       p.status
+       p.src_type,
+       p.status,
+       p.plan_date,
+       m.proc_order
   FROM PICK_TABLE p
   JOIN KIT_TABLE  k ON k.seq = p.kit_seq
+  LEFT JOIN proc_master m ON m.model = p.model
+                         AND m.proc_code = p.vornr
+                         AND m.use_yn = 1
+  LEFT JOIN lpn_master w  ON w.seq = k.w_lpn_seq
+  LEFT JOIN location_master wl ON wl.seq = w.location_seq
+  LEFT JOIN lpn_master d  ON d.seq = k.d_lpn_seq
+  LEFT JOIN location_master dl ON dl.seq = d.location_seq
  WHERE p.status IN ('ISSUED','PICKED')
    AND p.lifecycle_status = 'ACTIVE'
    AND k.lifecycle_status = 'ACTIVE'
- ORDER BY k.engine_seq_no,
-          k.delivery_seq,
+   AND p.plan_date >= CONVERT(char(10), GETDATE(), 23)
+ ORDER BY p.plan_date,
+          ISNULL(m.proc_order, 9999),
+          k.engine_seq_no,
           CASE WHEN p.lpn_type = 'W' THEN 0 ELSE 1 END,
           p.item_code
 """
-
-
 # ── 단일 조회 (태블릿 피킹 화면) ────────────────────────────
 #   1행 = 1스캔 단위. 한 자재가 여러 팔레트에 걸리면 행이 나뉜다.
 #   예) A볼트 24개 → A-01-02 에서 9개 / A-03-03 에서 15개 → 2행
 #   파라미터 : kit_seq
-SELECT_BY_SEQ_GROUP_KIT = """
+
+
+# 피킹리스트 1장 — 지시번호 기준
+#   파라미터 : pick_no
+SELECT_BY_PICK_NO = """
 SELECT p.seq,
+       p.pick_no,
+       p.src_type,
        p.kit_seq,
        p.order_no,
+       k.kit_no,
        k.engine_seq_no,
        k.engine_no,
        k.proc_code,
@@ -71,6 +73,12 @@ SELECT p.seq,
        k.hold_yn,
        k.w_lpn_seq,
        k.d_lpn_seq,
+       w.lpn_code       AS w_lpn_code,
+       w.process_status AS w_lpn_status,
+       wl.location_code AS w_location,
+       d.lpn_code       AS d_lpn_code,
+       d.process_status AS d_lpn_status,
+       dl.location_code AS d_location,
        p.item_code,
        p.item_name,
        p.req_qty,
@@ -78,6 +86,7 @@ SELECT p.seq,
        p.uom,
        p.lpn_type,
        p.status,
+       i.size_type,
        t.seq      AS txn_seq,
        t.qty      AS plan_qty,
        t.status   AS txn_status,
@@ -85,12 +94,17 @@ SELECT p.seq,
        l.location_code
   FROM PICK_TABLE p
   JOIN KIT_TABLE  k ON k.seq = p.kit_seq
+  LEFT JOIN item_master i ON i.seq = p.item_seq
+  LEFT JOIN lpn_master w  ON w.seq = k.w_lpn_seq
+  LEFT JOIN location_master wl ON wl.seq = w.location_seq
+  LEFT JOIN lpn_master d  ON d.seq = k.d_lpn_seq
+  LEFT JOIN location_master dl ON dl.seq = d.location_seq
   LEFT JOIN lpn_txn t ON t.PICK_SEQ = p.seq
                      AND t.txn_type = 'PK'
                      AND t.status IN ('PLAN','DONE')
   LEFT JOIN lpn_master      m ON m.seq = t.lpn_master_seq
   LEFT JOIN location_master l ON l.seq = m.location_seq
- WHERE p.kit_seq = ?
+ WHERE p.pick_no = ?
    AND p.status IN ('ISSUED','PICKED')
    AND p.lifecycle_status = 'ACTIVE'
    AND k.lifecycle_status = 'ACTIVE'
@@ -98,30 +112,6 @@ SELECT p.seq,
           l.location_code,
           p.item_code
 """
-
-
-# ── LPN 채번 ────────────────────────────────────────────────
-#   [타입1] + [YYMMDD6] + [일련5] = 12자리. 타입별·일자별 독립 리셋.
-#   파라미터 : lpn_type x 3
-NEXT_LPN_NO = """
-SET NOCOUNT ON;
-DECLARE @d  CHAR(6) = CONVERT(CHAR(6), GETDATE(), 12);
-DECLARE @no INT;
-
-UPDATE lpn_seq WITH (UPDLOCK, SERIALIZABLE)
-   SET @no = last_no = last_no + 1
- WHERE lpn_type = ? AND yymmdd = @d;
-
-IF @no IS NULL
-BEGIN
-    INSERT INTO lpn_seq (lpn_type, yymmdd, last_no) VALUES (?, @d, 1);
-    SET @no = 1;
-END
-
-SELECT ? + @d + RIGHT('0000' + CAST(@no AS VARCHAR(5)), 5) AS lpn_code,
-       @no AS seq_no;
-"""
-
 
 # ── W/D-LPN 선발행 ──────────────────────────────────────────
 INSERT_LPN_MASTER = """
@@ -178,32 +168,6 @@ SELECT COUNT(*) FROM pick_table
  WHERE KIT_SEQ = ? AND ITEM_SEQ IS NULL
    AND STATUS = 'ISSUED' AND LIFECYCLE_STATUS = 'ACTIVE';
 """
-
-
-# ── 라벨 재발행 ─────────────────────────────────────────────
-#   훼손·분실 시 원본 VOID 후 신규 채번. 번호 재사용 없음.
-VOID_LPN = """
-UPDATE lpn_master
-   SET process_status   = 'VOID',
-       lifecycle_status = 'INACTIVE',
-       updated_date     = sysdatetime()
- WHERE seq = ? AND process_status IN ('CREATED','PRINTED');
-"""
-
-CLEAR_KIT_W_LPN = """
-UPDATE kit_table SET W_LPN_SEQ = NULL, UPDATED_DATE = sysdatetime()
- WHERE SEQ = ?;
-"""
-
-CLEAR_KIT_D_LPN = """
-UPDATE kit_table SET D_LPN_SEQ = NULL, UPDATED_DATE = sysdatetime()
- WHERE SEQ = ?;
-"""
-
-CLEAR_KIT_LPN = {
-    "W": CLEAR_KIT_W_LPN,
-    "D": CLEAR_KIT_D_LPN,
-}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -374,4 +338,109 @@ SET_PICK_COMP = """
 UPDATE lpn_master
    SET process_status = 'PICK_COMP', updated_date = sysdatetime()
  WHERE seq = ? AND process_status IN ('CREATED','PRINTED')
+   AND NOT EXISTS (
+       SELECT 1 FROM pick_table
+        WHERE KIT_SEQ = ? AND LPN_TYPE = ?
+          AND STATUS <> 'PICKED'
+          AND LIFECYCLE_STATUS = 'ACTIVE'
+   )
+"""
+
+# LPN 코드로 재발행 대상 조회
+#   파라미터 : lpn_code
+SELECT_REISSUE_TARGET_BY_CODE = """
+SELECT m.seq, m.lpn_code, m.lpn_type, m.process_status,
+       m.kit_seq, m.order_no, m.engine_no, m.proc_code,
+       k.WORK_CENTER_NM, k.STATUS AS kit_status,
+       CASE WHEN m.process_status IN ('CREATED','PRINTED') THEN 1 ELSE 0 END AS can_reissue
+  FROM lpn_master m
+  LEFT JOIN kit_table k ON k.SEQ = m.kit_seq
+ WHERE m.lpn_code = ? AND m.lifecycle_status = 'ACTIVE'
+"""
+
+#   파라미터 : lpn_seq
+SELECT_REISSUE_TARGET_BY_SEQ = """
+SELECT m.seq, m.lpn_code, m.lpn_type, m.process_status,
+       m.kit_seq, m.order_no, m.engine_no, m.proc_code,
+       k.WORK_CENTER_NM, k.STATUS AS kit_status,
+       CASE WHEN m.process_status IN ('CREATED','PRINTED') THEN 1 ELSE 0 END AS can_reissue
+  FROM lpn_master m
+  LEFT JOIN kit_table k ON k.SEQ = m.kit_seq
+ WHERE m.seq = ? AND m.lifecycle_status = 'ACTIVE'
+"""
+
+REPRINT_LPN = """
+UPDATE lpn_master
+   SET reprint_cnt  = reprint_cnt + 1,
+       print_yn     = 1,
+       updated_date = sysdatetime()
+ OUTPUT INSERTED.lpn_code, INSERTED.reprint_cnt
+ WHERE seq = ? AND process_status IN ('CREATED','PRINTED')
+"""
+
+
+# 라벨 발행 시 피킹 착수로 전이
+#   파라미터 : kit_seq
+START_PICKING = """
+UPDATE kit_table
+   SET STATUS = 'PICKING', UPDATED_DATE = sysdatetime()
+ WHERE SEQ = ? AND STATUS = 'WAIT'
+"""
+
+
+# 피킹리스트 1장 — 키팅 기준 (긴급 보충 포함)
+#   파라미터 : kit_seq
+SELECT_BY_SEQ_GROUP_KIT = """
+SELECT p.seq,
+       p.kit_seq,
+       p.pick_no,
+       p.order_no,
+       p.model,
+       k.kit_no,
+       k.engine_seq_no,
+       k.engine_no,
+       k.proc_code,
+       k.work_center_nm,
+       k.delivery_seq,
+       k.status   AS kit_status,
+       k.hold_yn,
+       k.w_lpn_seq,
+       k.d_lpn_seq,
+       p.item_code,
+       p.item_name,
+       p.req_qty,
+       p.picked_qty,
+       p.uom,
+       p.lpn_type,
+       p.status,
+       t.seq      AS txn_seq,
+       t.qty      AS plan_qty,
+       t.status   AS txn_status,
+       m.lpn_code AS r_lpn_code,
+       l.location_code
+  FROM PICK_TABLE p
+  JOIN KIT_TABLE  k ON k.seq = p.kit_seq
+  LEFT JOIN lpn_txn t ON t.PICK_SEQ = p.seq
+                     AND t.txn_type = 'PK'
+                     AND t.status IN ('PLAN','DONE')
+  LEFT JOIN lpn_master      m ON m.seq = t.lpn_master_seq
+  LEFT JOIN location_master l ON l.seq = m.location_seq
+ WHERE p.kit_seq = ?
+   AND p.status IN ('ISSUED','PICKED')
+   AND p.lifecycle_status = 'ACTIVE'
+   AND k.lifecycle_status = 'ACTIVE'
+ ORDER BY CASE WHEN p.lpn_type = 'W' THEN 0 ELSE 1 END,
+          l.location_code,
+          p.item_code
+"""
+
+
+
+# 긴급 보충이 붙어 있으면 확정 취소 불가.
+# 긴급분은 확정 단계를 건너뛴 지시라 WAIT 으로 되돌릴 수 없다.
+#   파라미터 : kit_seq
+COUNT_EMERGENCY_ATTACHED = """
+SELECT COUNT(*) FROM pick_table
+ WHERE KIT_SEQ = ? AND SRC_TYPE = 'URGENT'
+   AND LIFECYCLE_STATUS = 'ACTIVE'
 """

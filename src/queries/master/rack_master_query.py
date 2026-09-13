@@ -49,12 +49,6 @@ WHERE r.rack_code LIKE ?
    OR r.rack_name LIKE ?
 """ + GROUP_ORDER
 
-# 구역별 조회   파라미터 : zone_seq
-SELECT_BY_ZONE = SELECT_BASE + """
-WHERE r.zone_seq = ?
-""" + GROUP_ORDER
-
-
 # ── 상세 : 랙 기본정보 + 셀 목록 ─────────────────────────────
 #   row_no DESC : 상단이 화면 위로 오도록 (1단 = 최하단 기준)
 SELECT_BY_SEQ = """
@@ -75,7 +69,6 @@ SELECT
     l.location_code,
     l.row_no,
     l.col_no,
-    l.max_weight,
     l.enable_yn AS location_enable_yn
 FROM rack_master r
 JOIN zone_master z
@@ -120,17 +113,47 @@ SELECT 1 FROM rack_master WHERE rack_code = ? AND seq <> ?
 
 # ── 사용중지 / 삭제 ─────────────────────────────────────────
 #   lpn_txn 이 로케이션을 이력으로 참조하므로 사용중지가 기본.
-#   물리삭제는 하위 셀이 하나도 없을 때만 허용한다.
+#   물리삭제는 잘못 만든 랙을 치우는 용도다.
 DISABLE = """
 UPDATE rack_master
    SET enable_yn = 0, updated_date = SYSDATETIME()
  WHERE seq = ?
 """
 
+# 삭제 가능 여부.
+#   "셀이 있느냐" 로 막으면 안 된다. 랙을 등록하면 INSERT_LOCATIONS 로
+#   셀이 곧바로 생기므로 그 조건은 사실상 영구 차단이 된다.
+#   실제로 막아야 하는 것은 '그 셀을 누가 참조하고 있느냐' 다.
+#
+#   location_master.seq 를 참조하는 곳 (전부 ON DELETE NO_ACTION):
+#     lpn_master.location_seq                        현재 적치
+#     pick_table.LOCATION_SEQ                        피킹 지시
+#     lpn_txn.from_location_seq / to_location_seq    이송 이력
+#
+#   파라미터 : rack_seq 5개
 CHECK_DELETABLE = """
-SELECT COUNT(*) AS location_cnt
-  FROM location_master
- WHERE rack_seq = ?
+SELECT
+    (SELECT COUNT(*) FROM location_master WHERE rack_seq = ?) AS location_cnt,
+
+    (SELECT COUNT(*) FROM lpn_master m
+      WHERE m.location_seq IN (SELECT seq FROM location_master WHERE rack_seq = ?)
+    ) AS lpn_cnt,
+
+    (SELECT COUNT(*) FROM pick_table p
+      WHERE p.LOCATION_SEQ IN (SELECT seq FROM location_master WHERE rack_seq = ?)
+    ) AS pick_cnt,
+
+    (SELECT COUNT(*) FROM lpn_txn t
+      WHERE t.from_location_seq IN (SELECT seq FROM location_master WHERE rack_seq = ?)
+         OR t.to_location_seq   IN (SELECT seq FROM location_master WHERE rack_seq = ?)
+    ) AS txn_cnt
+"""
+
+# 셀 삭제. rack_master 를 지우기 전에 반드시 먼저 지운다.
+#   location_master.rack_seq 에 FK(NO_ACTION)가 걸려 있어
+#   셀이 남아 있으면 랙만 지우는 것은 FK 위반으로 실패한다.
+DELETE_LOCATIONS = """
+DELETE FROM location_master WHERE rack_seq = ?
 """
 
 DELETE = """
@@ -158,11 +181,6 @@ SELECT R.rack_code + '-'
 """
 
 # 등록 직후 seq 회수
-INSERT_RETURN_SEQ = """
-SELECT SCOPE_IDENTITY() AS seq
-"""
-
-
 EXISTS_CODE_SEQ = """
 SELECT seq FROM rack_master WHERE rack_code = ?
 """

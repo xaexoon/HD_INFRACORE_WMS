@@ -2,18 +2,13 @@ from src.queries import rack_query
 from src.db.connection import query, execute
 from src.logger.logger import get_logger
 
-logger = get_logger("Rack Service")
+logger = get_logger("svc.rack")
 
 
 # ── 상단 필터 ──────────────────────────────────────────────
 def get_zones() -> list[dict]:
     """랙 위치(구역) 셀렉트박스용."""
     return query(rack_query.SELECT_ZONES)
-
-
-def get_racks_in_zone(zone_seq: int) -> list[dict]:
-    """랙 번호 셀렉트박스용. 구역 선택 시 갱신."""
-    return query(rack_query.SELECT_RACKS_IN_ZONE, (zone_seq,))
 
 
 # ── 좌측 패널 : 구역 격자 ──────────────────────────────────
@@ -97,24 +92,10 @@ def get_cell_detail(location_seq: int) -> dict | None:
 
 
 # ── 검색 ───────────────────────────────────────────────────
-def get_stock_by_item(item_code: str) -> list[dict]:
-    """자재코드로 재고 위치 역추적."""
-    return query(rack_query.SELECT_BY_ITEM, (item_code.strip(),))
-
-
 def search_items(keyword: str) -> list[dict]:
     """자재코드 / 품명 부분일치 검색."""
     like = f"%{keyword}%"
     return query(rack_query.SELECT_BY_ITEM_KEYWORD, (like, like))
-
-
-def get_by_lpn_code(lpn_code: str) -> dict | None:
-    """LPN 바코드 스캔 조회."""
-    rows = query(rack_query.SELECT_BY_LPN_CODE, (lpn_code.strip().upper(),))
-    if not rows:
-        return None
-    grouped = _group_by_lpn(rows)
-    return grouped[0] if grouped else None
 
 
 # ── 내부 헬퍼 ──────────────────────────────────────────────

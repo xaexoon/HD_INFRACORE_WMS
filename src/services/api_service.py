@@ -3,7 +3,7 @@ from src.logger.logger import get_logger
 from src.queries import lpn_query, item_query
 from enum import Enum
 
-logger = get_logger("API Service")
+logger = get_logger("svc.api")
 
 class LpnType(str, Enum):
     RAW  = "R"   # 원자재 (메인랙 상주, 반복 사용)

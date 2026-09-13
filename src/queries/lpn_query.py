@@ -22,26 +22,17 @@ WHERE m.lifecycle_status = 'ACTIVE'
 ORDER BY m.lpn_code
 """
 
-SELECT_BY_CODE_LPN = SELECT_BASE + """
-WHERE m.lpn_code = ?
+SELECT_BY_ITEM_CODE = SELECT_BASE + """
+WHERE i.item_code = ?
+  AND m.lpn_type = 'R'
+  AND m.process_status = 'AVAILABLE'
+  AND m.lifecycle_status = 'ACTIVE'
+  AND d.current_qty > 0
+ORDER BY m.receipt_date, m.lpn_code
 """
 
 SELECT_BY_SEQ = SELECT_BASE + """
 WHERE m.seq = ?
-"""
-
-# 발행 대기 목록 — 등록만 되고 라벨 미출력
-SELECT_UNPRINTED_LPN = SELECT_BASE + """
-WHERE m.process_status = 'CREATED'
-  AND m.lifecycle_status = 'ACTIVE'
-ORDER BY m.seq
-"""
-
-# 적치 대기 목록 — 라벨은 나왔으나 위치 미확정
-SELECT_UNBOUND_LPN = SELECT_BASE + """
-WHERE m.process_status = 'PRINTED'
-  AND m.lifecycle_status = 'ACTIVE'
-ORDER BY m.seq
 """
 
 SELECT_R_LPN = SELECT_BASE + """
@@ -54,36 +45,14 @@ SELECT_R_LPN_BY_CODE = SELECT_BASE + """
 WHERE m.lpn_type = 'R' AND m.lpn_code = ?
 """
 
+# 자재 조회 — 혼적 판정에 필요한 속성까지
+#   파라미터 : item_code
 SELECT_ITEM_BY_CODE = """
-SELECT seq, item_code, item_name, uom, washing_yn
-FROM item_master
-WHERE item_code = ? AND use_yn = 1
+SELECT seq, item_code, item_name, uom, washing_yn, mixed_allow, kitting_grp
+  FROM item_master
+ WHERE item_code = ? AND use_yn = 1
 """
 
-
-# ── 채번 ────────────────────────────────────────────────────
-#   LPN 코드 = [타입 1] + [YYMMDD 6] + [일련번호 5] = 12자리
-#   DB 저장은 하이픈 없음. 화면/라벨 표기 시에만 하이픈 삽입.
-#   타입별 + 일자별 독립 채번, 일자 변경 시 00001 로 리셋.
-#   파라미터 : lpn_type, yymmdd, lpn_type, yymmdd, lpn_type, yymmdd
-NEXT_LPN_NO = """
-SET NOCOUNT ON;
-DECLARE @d  CHAR(6) = CONVERT(CHAR(6), GETDATE(), 12);
-DECLARE @no INT;
-
-UPDATE lpn_seq WITH (UPDLOCK, SERIALIZABLE)
-   SET @no = last_no = last_no + 1
- WHERE lpn_type = ? AND yymmdd = @d;
-
-IF @no IS NULL
-BEGIN
-    INSERT INTO lpn_seq (lpn_type, yymmdd, last_no) VALUES (?, @d, 1);
-    SET @no = 1;
-END
-
-SELECT ? + @d + RIGHT('0000' + CAST(@no AS VARCHAR(5)), 5) AS lpn_code,
-       @no AS seq_no;
-"""
 
 # ── 1. 입고 등록 ────────────────────────────────────────────
 #   process_status 는 DEFAULT 로 CREATED. 위치·라벨 없음.
@@ -111,24 +80,6 @@ UPDATE lpn_master
    AND process_status = 'CREATED'
    AND lifecycle_status = 'ACTIVE'
 """
-
-UPDATE_PRINTED_BY_CODE = """
-UPDATE lpn_master
-   SET process_status = 'PRINTED',
-       print_yn       = 1,
-       updated_date   = SYSDATETIME()
- WHERE lpn_code = ?
-   AND process_status = 'CREATED'
-   AND lifecycle_status = 'ACTIVE'
-"""
-
-# 라벨 재출력 — 상태는 그대로, 훼손·미출력 대응
-REPRINT_BY_SEQ = """
-UPDATE lpn_master
-   SET print_yn = 1, updated_date = SYSDATETIME()
- WHERE seq = ? AND lifecycle_status = 'ACTIVE'
-"""
-
 
 # ── 3. 위치 바인딩 → 가용재고 전환 ──────────────────────────
 #   receipt_date 는 FIFO 정렬 기준이므로 실제 적치 시점에 찍는다.
@@ -181,13 +132,237 @@ UPDATE lpn_master
  WHERE seq = ? AND lifecycle_status = 'ACTIVE'
 """
 
-# 등록 취소 — 실물과 연결되기 전(CREATED/PRINTED)에만 허용
-CANCEL_LPN = """
-UPDATE lpn_master
-   SET process_status   = 'VOID',
-       lifecycle_status = 'INACTIVE',
-       updated_date     = SYSDATETIME()
- WHERE seq = ?
-   AND process_status IN ('CREATED', 'PRINTED')
-   AND lifecycle_status = 'ACTIVE'
+# ═══════════════════════════════════════════════════════════
+# 팔레트 통합 (MG)
+#   소스 LPN 의 자재를 타겟 LPN 으로 합치고 소스를 소멸시킨다.
+#   보관 효율을 위한 실물 작업이므로 수량 총합은 변하지 않는다.
+#
+#   ※ R-LPN 만 대상. W/D-LPN 은 호기·공정에 바인딩되어 있어
+#     다른 지시의 용기와 합치면 오조립이 된다.
+# ═══════════════════════════════════════════════════════════
+
+# 담긴 자재. 수량 0 인 행은 제외.
+#   파라미터 : lpn_master_seq
+SELECT_DETAIL_FOR_MERGE = """
+SELECT d.seq AS detail_seq, d.item_seq, d.current_qty,
+       i.item_code, i.item_name
+  FROM lpn_detail d
+  JOIN item_master i ON i.seq = d.item_seq
+ WHERE d.lpn_master_seq = ? AND d.current_qty > 0
+ ORDER BY i.item_code
 """
+
+# 할당(PLAN)이 걸려 있는가. 걸려 있으면 통합 불가.
+#   파라미터 : lpn_master_seq
+COUNT_LPN_PLAN = """
+SELECT COUNT(*) FROM lpn_txn
+ WHERE lpn_master_seq = ? AND txn_type = 'PK' AND status = 'PLAN'
+"""
+
+# 타겟에 같은 자재가 있으면 합산, 없으면 신규.
+#   파라미터 : qty, qty, lpn_master_seq, item_seq
+ADD_TARGET_QTY = """
+UPDATE lpn_detail
+   SET init_qty    = init_qty + ?,
+       current_qty = current_qty + ?,
+       updated_date = sysdatetime()
+ OUTPUT INSERTED.seq
+ WHERE lpn_master_seq = ? AND item_seq = ?
+"""
+
+#   파라미터 : lpn_master_seq, item_seq, qty, qty
+INSERT_TARGET_DETAIL = """
+INSERT INTO lpn_detail (lpn_master_seq, item_seq, init_qty, current_qty)
+OUTPUT INSERTED.seq
+VALUES (?, ?, ?, ?)
+"""
+
+# 소스 비우기
+#   파라미터 : detail_seq
+CLEAR_SOURCE_QTY = """
+UPDATE lpn_detail
+   SET current_qty = 0, updated_date = sysdatetime()
+ WHERE seq = ?
+"""
+
+# 소스 소멸. 라벨은 폐기되고 번호는 재사용하지 않는다.
+#   파라미터 : lpn_master_seq
+INACTIVE_SOURCE_LPN = """
+UPDATE lpn_master
+   SET process_status   = 'CONSUMED',
+       lifecycle_status = 'INACTIVE',
+       location_seq     = NULL,
+       updated_date     = sysdatetime()
+ WHERE seq = ?
+"""
+
+# 통합 후 타겟은 헐린 팔레트로 표시 — 차기 피킹 최우선
+#   파라미터 : lpn_master_seq
+SET_TARGET_SPLIT = """
+UPDATE lpn_master
+   SET split_yn = 1, updated_date = sysdatetime()
+ WHERE seq = ?
+"""
+
+# 통합 이력
+#   파라미터 : target_seq, target_detail_seq, item_seq, qty,
+#              from_location_seq, to_location_seq,
+#              device_id, worker_id, source_seq
+INSERT_TXN_MERGE_PALLET = """
+INSERT INTO lpn_txn
+      (txn_type, status, lpn_master_seq, to_lpn_seq, to_detail_seq,
+       item_seq, qty, from_location_seq, to_location_seq,
+       device_id, worker_id)
+VALUES ('MG', 'DONE', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+
+SELECT_LPN_FOR_MERGE_BY_CODE = """
+SELECT m.seq, m.lpn_code, m.lpn_type, m.process_status, m.lifecycle_status,
+       m.location_seq, m.split_yn, m.kit_seq,
+       l.location_code
+  FROM lpn_master m
+  LEFT JOIN location_master l ON l.seq = m.location_seq
+ WHERE m.lpn_code = ?
+"""
+
+# 통합 전 미리보기 — 화면에서 확인용
+#   파라미터 : lpn_code
+SELECT_MERGE_PREVIEW = """
+SELECT m.seq, m.lpn_code, m.lpn_type, m.process_status,
+       l.location_code, m.receipt_date, m.split_yn,
+       i.item_code, i.item_name, d.current_qty, d.init_qty, i.uom
+  FROM lpn_master m
+  LEFT JOIN location_master l ON l.seq = m.location_seq
+  LEFT JOIN lpn_detail d ON d.lpn_master_seq = m.seq AND d.current_qty > 0
+  LEFT JOIN item_master i ON i.seq = d.item_seq
+ WHERE m.lpn_code = ? AND m.lifecycle_status = 'ACTIVE'
+ ORDER BY i.item_code
+"""
+
+
+# ═══════════════════════════════════════════════════════════
+# 물리적 통합 입고 (입고 규칙 2)
+#   신규 입고분을 기존 R-LPN 에 합산한다. 새 LPN 을 발행하지 않는다.
+#   실물도 같은 팔레트에 올리므로 위치는 변하지 않는다.
+#
+#   ※ init_qty 도 함께 늘린다. 라벨 표기와 어긋나므로
+#     현장에서 라벨 재출력이 필요할 수 있다.
+# ═══════════════════════════════════════════════════════════
+
+#   파라미터 : lpn_master_seq, item_seq
+SELECT_DETAIL_BY_ITEM = """
+SELECT d.seq AS detail_seq, d.init_qty, d.current_qty,
+       m.lpn_code, m.process_status, m.lifecycle_status, m.location_seq,
+       i.item_code, i.item_name, i.uom
+  FROM lpn_detail d
+  JOIN lpn_master m  ON m.seq = d.lpn_master_seq
+  JOIN item_master i ON i.seq = d.item_seq
+ WHERE d.lpn_master_seq = ? AND d.item_seq = ?
+"""
+
+# 수량 합산
+#   파라미터 : qty, qty, detail_seq
+ADD_MERGE_QTY = """
+UPDATE lpn_detail
+   SET init_qty     = init_qty + ?,
+       current_qty  = current_qty + ?,
+       updated_date = sysdatetime()
+ WHERE seq = ?
+"""
+
+# 입고 이력. 신규 입고분이므로 IN.
+#   파라미터 : lpn_master_seq, item_seq, qty,
+#              to_location_seq, device_id, worker_id
+INSERT_TXN_MERGE_IN = """
+INSERT INTO lpn_txn
+      (txn_type, status, lpn_master_seq, item_seq, qty,
+       to_location_seq, device_id, worker_id)
+VALUES ('IN', 'DONE', ?, ?, ?, ?, ?, ?)
+"""
+
+
+# LPN 상세 — 수정 화면용. Multi-SKU 면 여러 행.
+#   파라미터 : lpn_master_seq
+SELECT_DETAIL_FOR_UPDATE = """
+SELECT d.seq AS detail_seq, d.item_seq, d.init_qty, d.current_qty,
+       i.item_code, i.item_name, i.uom,
+       m.lpn_code, m.lpn_type, m.process_status, m.lifecycle_status,
+       m.location_seq
+  FROM lpn_detail d
+  JOIN lpn_master m  ON m.seq = d.lpn_master_seq
+  JOIN item_master i ON i.seq = d.item_seq
+ WHERE m.seq = ?
+ ORDER BY i.item_code
+"""
+
+# 자재 1행 수량 수정
+#   파라미터 : init_qty, current_qty, detail_seq, lpn_master_seq
+UPDATE_DETAIL_QTY_ONE = """
+UPDATE d
+   SET d.init_qty = ?, d.current_qty = ?, d.updated_date = SYSDATETIME()
+  FROM lpn_detail d
+ WHERE d.seq = ? AND d.lpn_master_seq = ?
+"""
+
+# 할당(PLAN)이 걸린 자재는 수량을 줄이면 지시가 깨진다
+#   파라미터 : lpn_master_seq, item_seq
+COUNT_ITEM_PLAN = """
+SELECT ISNULL(SUM(qty), 0) FROM lpn_txn
+ WHERE lpn_master_seq = ? AND item_seq = ?
+   AND txn_type = 'PK' AND status = 'PLAN'
+"""
+
+#K-LPN 리스트 조회
+SELECT_K_LPN_FOR_RFID = """
+SELECT m.seq, m.lpn_code, m.rfid_yn, m.rfid_date,
+       m.order_no, m.engine_no, m.proc_code, m.engine_seq_no,
+       m.created_date,
+       k.KIT_NO, k.STATION_NO, k.STATION_NAME, k.WORK_CENTER_NM
+  FROM lpn_master m
+  LEFT JOIN kit_table k ON k.SEQ = m.kit_seq
+ WHERE m.lpn_type = 'K'
+   AND m.lifecycle_status = 'ACTIVE'
+   AND m.created_date >= ?
+   AND m.created_date <  DATEADD(DAY, 1, ?)
+ ORDER BY m.rfid_yn, m.created_date
+"""
+
+# K-LPN RFID Write
+RFID_WRITE = """
+UPDATE lpn_master
+   SET rfid_yn = 1,
+       rfid_date = SYSDATETIME()
+ WHERE lpn_code = ?
+   AND rfid_yn = 0
+"""
+
+# select kit by w-lpn
+SELECT_W_LPN_INFO = """
+SELECT m.seq        AS lpn_seq,
+       m.lpn_code,
+       m.lpn_type,
+       m.process_status,
+       k.SEQ        AS kit_seq,
+       k.KIT_NO,
+       k.MODEL,
+       k.ENGINE_NO,
+       k.ENGINE_SEQ_NO,
+       k.PROC_CODE,
+       k.WORK_CENTER_NM,
+       k.PLAN_DATE,
+       p.PICK_NO
+  FROM lpn_master m
+  LEFT JOIN kit_table k ON k.SEQ = m.kit_seq
+  OUTER APPLY (
+      SELECT TOP 1 x.PICK_NO
+        FROM pick_table x
+       WHERE x.KIT_SEQ = k.SEQ
+         AND x.LIFECYCLE_STATUS = 'ACTIVE'
+         AND x.SRC_TYPE <> 'URGENT'
+       ORDER BY x.SEQ
+  ) p
+ WHERE m.lpn_code = ?
+   AND m.lifecycle_status = 'ACTIVE'
+"""
+

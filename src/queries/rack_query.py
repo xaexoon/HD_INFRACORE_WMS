@@ -27,24 +27,8 @@ ORDER BY z.zone_code
 """
 
 
-# ── 2. 구역 내 랙 목록 ──────────────────────────────────────
-#   상단 '랙 번호' 셀렉트박스용. 파라미터 : zone_seq
-SELECT_RACKS_IN_ZONE = """
-SELECT
-    r.seq,
-    r.rack_code,
-    r.rack_name,
-    r.[rows],
-    r.cols
-FROM rack_master r
-WHERE r.zone_seq = ?
-  AND r.enable_yn = 1
-ORDER BY r.rack_code
-"""
-
-
-# ── 3. 구역 전체 격자 — 화면 좌측 패널 ──────────────────────
-#   셀 단위 집계만 수행. 실제 LPN/자재는 8번 쿼리로 받아
+# ── 2. 구역 전체 격자 — 화면 좌측 패널 ──────────────────────
+#   셀 단위 집계만 수행. 실제 LPN/자재는 6번 쿼리로 받아
 #   서비스에서 셀별로 매단다.
 #   빈 셀도 나와야 하므로 location_master LEFT JOIN.
 #   파라미터 : zone_seq
@@ -90,7 +74,7 @@ SELECT_ZONE_GRID_BY_RACK = SELECT_ZONE_GRID.replace(
 )
 
 
-# ── 4. 셀 위치정보 — 빈 셀도 반드시 1행 ─────────────────────
+# ── 3. 셀 위치정보 — 빈 셀도 반드시 1행 ─────────────────────
 #   LPN 이 없어도 "여기가 어디인지"는 보여줘야 한다.
 #   파라미터 : location_seq
 SELECT_CELL_INFO = """
@@ -114,7 +98,7 @@ WHERE l.seq = ?
 """
 
 
-# ── 5. 셀 상세 — 격자에서 칸 클릭 시 ────────────────────────
+# ── 4. 셀 상세 — 격자에서 칸 클릭 시 ────────────────────────
 #   그 셀의 LPN 과 자재를 전부 펼친다. 파라미터 : location_seq
 SELECT_CELL_DETAIL = """
 SELECT
@@ -147,48 +131,7 @@ ORDER BY m.receipt_date, m.lpn_code, i.item_code
 """
 
 
-# ── 6. 자재 역추적 — "이 자재 어디 있어?" ───────────────────
-#   정렬은 피킹 할당 우선순위와 동일 (분할잔량 우선 → FIFO)
-#   위치가 없는 LPN(CREATED/PRINTED)도 보이도록 LEFT JOIN
-#   파라미터 : item_code
-SELECT_BY_ITEM = """
-SELECT
-    z.zone_code,
-    z.zone_name,
-    r.rack_code,
-    r.rack_name,
-    l.location_code,
-    l.row_no,
-    l.col_no,
-    m.seq              AS lpn_master_seq,
-    m.lpn_code,
-    m.lpn_type,
-    m.process_status,
-    m.split_yn,
-    m.receipt_date,
-    i.item_code,
-    i.item_name,
-    i.uom,
-    d.current_qty
-FROM lpn_detail d
-JOIN item_master i
-    ON i.seq = d.item_seq
-JOIN lpn_master m
-    ON m.seq = d.lpn_master_seq
-   AND m.lifecycle_status = 'ACTIVE'
-LEFT JOIN location_master l
-    ON l.seq = m.location_seq
-LEFT JOIN rack_master r
-    ON r.seq = l.rack_seq
-LEFT JOIN zone_master z
-    ON z.seq = r.zone_seq
-WHERE i.item_code = ?
-  AND d.current_qty > 0
-ORDER BY m.split_yn DESC, m.receipt_date
-"""
-
-
-# ── 7. 자재 검색 — 코드/품명 부분일치 ───────────────────────
+# ── 5. 자재 검색 — 코드/품명 부분일치 ───────────────────────
 #   파라미터 : %검색어%, %검색어%
 SELECT_BY_ITEM_KEYWORD = """
 SELECT
@@ -214,53 +157,8 @@ ORDER BY i.item_code
 """
 
 
-# ── 8. LPN 코드로 조회 — 바코드 스캔용 ──────────────────────
-#   스캔했는데 안 나오면 작업자가 당황하므로 lifecycle_status 를
-#   필터하지 않고 소멸된 LPN 도 상태를 그대로 보여준다.
-#   파라미터 : lpn_code
-SELECT_BY_LPN_CODE = """
-SELECT
-    m.seq              AS lpn_master_seq,
-    m.lpn_code,
-    m.lpn_type,
-    m.process_status,
-    m.lifecycle_status,
-    m.split_yn,
-    m.receipt_date,
-    z.zone_code,
-    z.zone_name,
-    r.rack_code,
-    r.rack_name,
-    l.location_code,
-    l.row_no,
-    l.col_no,
-
-    d.seq              AS lpn_detail_seq,
-    i.seq              AS item_seq,
-    i.item_code,
-    i.item_name,
-    i.uom,
-    i.washing_yn,
-    d.init_qty,
-    d.current_qty
-FROM lpn_master m
-JOIN lpn_detail d
-    ON d.lpn_master_seq = m.seq
-JOIN item_master i
-    ON i.seq = d.item_seq
-LEFT JOIN location_master l
-    ON l.seq = m.location_seq
-LEFT JOIN rack_master r
-    ON r.seq = l.rack_seq
-LEFT JOIN zone_master z
-    ON z.seq = r.zone_seq
-WHERE m.lpn_code = ?
-ORDER BY i.item_code
-"""
-
-
-# ── 9. 구역 내 전체 적치 자재 — 격자에 붙일 상세 ────────────
-#   격자(3번)는 집계만 하므로 실제 LPN/자재는 이 쿼리로 받아
+# ── 6. 구역 내 전체 적치 자재 — 격자에 붙일 상세 ────────────
+#   격자(2번)는 집계만 하므로 실제 LPN/자재는 이 쿼리로 받아
 #   서비스에서 location_seq 기준으로 셀에 매단다.
 #   파라미터 : zone_seq
 SELECT_ZONE_CELL_ITEMS = """
